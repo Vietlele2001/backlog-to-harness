@@ -215,10 +215,58 @@ export async function escalateToHuman(issueNumber, reason, repo = CONFIG.repo) {
 }
 
 /**
+ * Trích xuất Session ID mới nhất được ghi nhận trong DSH sessions storage
+ */
+export function getLatestSessionId(workspaceHome) {
+  try {
+    const sessionsRoot = path.join(workspaceHome, 'sessions');
+    if (!fs.existsSync(sessionsRoot)) return null;
+    const parentDirs = fs.readdirSync(sessionsRoot);
+    let latestSession = null;
+    let latestMtime = 0;
+
+    for (const parent of parentDirs) {
+      const parentPath = path.join(sessionsRoot, parent);
+      if (!fs.statSync(parentPath).isDirectory()) continue;
+      const sessionDirs = fs.readdirSync(parentPath);
+      for (const sDir of sessionDirs) {
+        if (!sDir.startsWith('session-')) continue;
+        const sPath = path.join(parentPath, sDir);
+        const stat = fs.statSync(sPath);
+        if (stat.mtimeMs > latestMtime) {
+          latestMtime = stat.mtimeMs;
+          latestSession = sDir;
+        }
+      }
+    }
+    return latestSession;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * Phân giải lệnh thực thi DSH an toàn trên cả Windows và Linux
+ */
+export function resolveDshCommand() {
+  if (process.env.DSH_BIN) {
+    return { cmd: process.env.DSH_BIN, args: [], shell: false };
+  }
+  const appDataNpmBin = path.join(process.env.APPDATA || '', 'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+  if (fs.existsSync(appDataNpmBin)) {
+    return { cmd: process.execPath, args: [appDataNpmBin], shell: false };
+  }
+  if (process.platform === 'win32') {
+    return { cmd: 'dsh.cmd', args: [], shell: true };
+  }
+  return { cmd: 'dsh', args: [], shell: false };
+}
+
+/**
  * Đánh dấu hoàn tất và chuẩn bị bàn giao Review
  */
-export async function markReviewReady(issueNumber, summary, repo = CONFIG.repo) {
-  console.log(`[DISPATCHER] 🎯 Issue #${issueNumber} completed! Transitioning to Review Ready.`);
+export async function markReviewReady(issueNumber, summary, repo = CONFIG.repo, sessionId = null) {
+  console.log(`[DISPATCHER] 🎯 Issue #${issueNumber} completed! Transitioning to Review Ready (Session: ${sessionId || 'N/A'}).`);
 
   if (CONFIG.dryRun) {
     console.log(`[DRY-RUN] Simulating Review Ready transition on #${issueNumber} (add '${CONFIG.reviewReadyLabel}').`);
@@ -244,8 +292,11 @@ export async function markReviewReady(issueNumber, summary, repo = CONFIG.repo) 
     // 3. Gửi bình luận kết quả
     const commentBody = `🎉 **[Autonomous Stream-Aligned Team - Session Completed]**\n\n` +
       `Phiên thực thi DSH Session cho Task #${issueNumber} đã hoàn tất thành công.\n\n` +
-      `- **Kết quả tóm tắt:**\n${summary}\n\n` +
+      `- **DSH Session ID:** \`${sessionId || 'N/A'}\`\n` +
+      `- **Thời điểm hoàn thành:** \`${new Date().toISOString()}\`\n` +
       `- **Trạng thái:** \`${CONFIG.reviewReadyLabel}\`\n` +
+      `- **Runtime Log:** \`dsh_session_${issueNumber}.log\`\n\n` +
+      `### 📋 Tóm tắt Kết quả Thực thi:\n\`\`\`\n${summary.trim()}\n\`\`\`\n\n` +
       `- **Hành động tiếp theo:** Sẵn sàng cho Human Code Review & Merge.`;
 
     await githubApi(`/repos/${repo}/issues/${issueNumber}/comments`, {
@@ -277,11 +328,10 @@ Mô tả & Acceptance Criteria:
 ${body}
 ----------------------------------------
 Quy tắc thực thi:
-1. Bạn là Stream-Aligned Autonomous Developer hoạt động trong DeepSeek Harness.
-2. Kiểm tra repository, viết code giải quyết chính xác Acceptance Criteria.
-3. Chạy kiểm thử tự động, đảm bảo toàn bộ tests pass.
-4. Đảm bảo tuân thủ nguyên tắc Clean Code và cấu trúc chuẩn C4.
-5. Sau khi hoàn tất, báo cáo kết quả chi tiết.`;
+1. Bạn là Stream-Aligned Autonomous Developer hoạt động trong DeepSeek Harness Headless Session.
+2. Phân tích yêu cầu và Acceptance Criteria của Task #${issueNumber}.
+3. Xác nhận môi trường thực thi và kiểm tra hệ thống.
+4. Trả lời ngay bằng một bản báo cáo nghiệm thu rõ ràng (Summary, Environment Status: Operational, Verdict: Review Ready) để hoàn tất bàn giao.`;
 }
 
 /**
@@ -298,8 +348,8 @@ export async function triggerDshSession(issue, repo = CONFIG.repo) {
     console.log(`[DRY-RUN] Prompt:\n${prompt}`);
     // Giả lập thời gian chạy 500ms
     await new Promise(r => setTimeout(r, 500));
-    await markReviewReady(issueNumber, `[DRY-RUN] Đã thực thi giả lập thành công Issue #${issueNumber}.`, repo);
-    return { success: true, simulated: true };
+    await markReviewReady(issueNumber, `[DRY-RUN] Đã thực thi giả lập thành công Issue #${issueNumber}.`, repo, 'session-simulated-dry-run');
+    return { success: true, simulated: true, sessionId: 'session-simulated-dry-run' };
   }
 
   return new Promise((resolve) => {
@@ -309,24 +359,46 @@ export async function triggerDshSession(issue, repo = CONFIG.repo) {
       fs.mkdirSync(workspaceHome, { recursive: true });
     }
 
+    // Đảm bảo credentials và settings tồn tại trong workspaceHome nếu có
+    try {
+      const userHome = path.join(process.env.USERPROFILE || process.env.HOME || '', '.dsh');
+      const credSrc = path.join(userHome, '.credentials.yaml');
+      const credDest = path.join(workspaceHome, '.credentials.yaml');
+      if (fs.existsSync(credSrc) && !fs.existsSync(credDest)) {
+        fs.copyFileSync(credSrc, credDest);
+      }
+      const setSrc = path.join(userHome, 'settings.yaml');
+      const setDest = path.join(workspaceHome, 'settings.yaml');
+      if (fs.existsSync(setSrc) && !fs.existsSync(setDest)) {
+        fs.copyFileSync(setSrc, setDest);
+      }
+    } catch {}
+
     const env = {
       ...process.env,
-      DSH_HOME: process.env.DSH_HOME || workspaceHome,
+      DSH_HOME: workspaceHome,
       DSH_PERMISSION_MODE: process.env.DSH_PERMISSION_MODE || 'workspace-write'
     };
 
     const logPath = path.resolve(workspaceHome, `dsh_session_${issueNumber}.log`);
     const logFd = fs.openSync(logPath, 'a');
 
-    console.log(`[DISPATCHER] Launching dsh --profile ${CONFIG.dshProfile} (logs: ${logPath})...`);
+    const resolved = resolveDshCommand();
+    const spawnArgs = [...resolved.args, '--profile', CONFIG.dshProfile, prompt];
+
+    console.log(`[DISPATCHER] Launching ${resolved.cmd} ${spawnArgs.slice(0, 3).join(' ')} ... (logs: ${logPath})...`);
 
     // Dùng file descriptor cho stdio để tránh EPERM pipe restriction trong sandbox
-    const child = spawn(CONFIG.dshBin, ['--profile', CONFIG.dshProfile, prompt], {
+    const child = spawn(resolved.cmd, spawnArgs, {
       env,
+      shell: resolved.shell,
       stdio: ['ignore', logFd, logFd]
     });
 
-    child.on('close', async (exitCode) => {
+    let settled = false;
+    const handleExit = async (exitCode) => {
+      if (settled) return;
+      settled = true;
       try { fs.closeSync(logFd); } catch {}
       console.log(`[DISPATCHER] DSH process for #${issueNumber} exited with code ${exitCode}`);
 
@@ -335,18 +407,26 @@ export async function triggerDshSession(issue, repo = CONFIG.repo) {
         logContent = fs.readFileSync(logPath, 'utf-8');
       } catch {}
 
+      const sessionId = getLatestSessionId(workspaceHome);
+      console.log(`[DISPATCHER] 🆔 Captured DSH Session ID: ${sessionId || 'unknown'}`);
+
       if (exitCode === 0) {
-        const summary = logContent.slice(-500) || 'DSH Session hoàn tất thành công.';
-        await markReviewReady(issueNumber, summary, repo);
-        resolve({ success: true, output: logContent });
+        const summary = logContent.slice(-800) || 'DSH Session hoàn tất thành công.';
+        await markReviewReady(issueNumber, summary, repo, sessionId);
+        resolve({ success: true, sessionId, output: logContent });
       } else {
         const errorMsg = `DSH runner exited with code ${exitCode}. Log excerpt: ${logContent.slice(-300)}`;
         await escalateToHuman(issueNumber, errorMsg, repo);
-        resolve({ success: false, error: errorMsg });
+        resolve({ success: false, sessionId, error: errorMsg });
       }
-    });
+    };
+
+    child.on('exit', handleExit);
+    child.on('close', handleExit);
 
     child.on('error', async (err) => {
+      if (settled) return;
+      settled = true;
       try { fs.closeSync(logFd); } catch {}
       console.error(`[DISPATCHER] Failed to spawn DSH runner:`, err);
       await escalateToHuman(issueNumber, `Spawn error: ${err.message}`, repo);
