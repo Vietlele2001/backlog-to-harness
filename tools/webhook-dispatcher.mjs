@@ -26,7 +26,7 @@ export const CONFIG = {
   secret: process.env.GITHUB_WEBHOOK_SECRET || '',
   token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '',
   repo: process.env.GITHUB_REPOSITORY || 'Vietlele2001/backlog-to-harness',
-  dshProfile: process.env.DSH_PROFILE || 'headless',
+  dshProfile: process.env.DSH_PROFILE || 'web',
   dshBin: process.env.DSH_BIN || (process.platform === 'win32' ? 'dsh.cmd' : 'dsh'),
   dryRun: process.env.DISPATCHER_DRY_RUN === '1' || process.env.DRY_RUN === 'true',
   triggerLabels: ['status:ready', 'type:ci-repair'],
@@ -149,8 +149,8 @@ export async function atomicLockTask(issueNumber, repo = CONFIG.repo) {
       `Task #${issueNumber} đã được **Atomic Locked** và tiếp nhận vào hàng đợi thực thi tự trị.\n\n` +
       `- **Thời điểm tiếp nhận:** \`${new Date().toISOString()}\`\n` +
       `- **Trạng thái:** \`${CONFIG.inProgressLabel}\`\n` +
-      `- **Runtime Engine:** DeepSeek Harness Session (Profile: \`${CONFIG.dshProfile}\`)\n` +
-      `- **Pipeline:** Webhook Dispatcher $\\to$ DSH Headless Runner\n\n` +
+      `- **Runtime Engine:** DeepSeek Harness Session (Profile: \`${CONFIG.dshProfile}\` - Visual UAT Mode)\n` +
+      `- **Pipeline:** Webhook Dispatcher $\\to$ DSH Web Runner\n\n` +
       `*Đang khởi chạy phiên thực thi tự trị độc lập...*`;
 
     await githubApi(`/repos/${repo}/issues/${issueNumber}/comments`, {
@@ -295,9 +295,10 @@ export async function markReviewReady(issueNumber, summary, repo = CONFIG.repo, 
       `- **DSH Session ID:** \`${sessionId || 'N/A'}\`\n` +
       `- **Thời điểm hoàn thành:** \`${new Date().toISOString()}\`\n` +
       `- **Trạng thái:** \`${CONFIG.reviewReadyLabel}\`\n` +
+      `- **Profile:** \`${CONFIG.dshProfile}\` (Visual UAT Ready)\n` +
       `- **Runtime Log:** \`dsh_session_${issueNumber}.log\`\n\n` +
       `### 📋 Tóm tắt Kết quả Thực thi:\n\`\`\`\n${summary.trim()}\n\`\`\`\n\n` +
-      `- **Hành động tiếp theo:** Sẵn sàng cho Human Code Review & Merge.`;
+      `- **Hành động tiếp theo:** Sẵn sàng cho Human UAT & Code Review.`;
 
     await githubApi(`/repos/${repo}/issues/${issueNumber}/comments`, {
       method: 'POST',
@@ -384,9 +385,12 @@ export async function triggerDshSession(issue, repo = CONFIG.repo) {
     const logFd = fs.openSync(logPath, 'a');
 
     const resolved = resolveDshCommand();
-    const spawnArgs = [...resolved.args, '--profile', CONFIG.dshProfile, prompt];
+    // Khi cấu hình profile web, CLI sử dụng headless engine làm backend thực thi tự trị
+    // và phục vụ dữ liệu cho Web GUI / Visual UAT.
+    const executionProfile = CONFIG.dshProfile === 'web' ? 'headless' : CONFIG.dshProfile;
+    const spawnArgs = [...resolved.args, '--profile', executionProfile, prompt];
 
-    console.log(`[DISPATCHER] Launching ${resolved.cmd} ${spawnArgs.slice(0, 3).join(' ')} ... (logs: ${logPath})...`);
+    console.log(`[DISPATCHER] Launching ${resolved.cmd} ${spawnArgs.slice(0, 3).join(' ')} ... (profile: ${CONFIG.dshProfile}, backend: ${executionProfile}, logs: ${logPath})...`);
 
     // Dùng file descriptor cho stdio để tránh EPERM pipe restriction trong sandbox
     const child = spawn(resolved.cmd, spawnArgs, {
