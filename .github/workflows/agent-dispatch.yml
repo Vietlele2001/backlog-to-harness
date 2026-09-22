@@ -1,0 +1,82 @@
+name: DSH Autonomous Ticket Dispatcher
+
+on:
+  issues:
+    types: [labeled, opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  dispatch:
+    # Chỉ xử lý khi issue có nhãn status:ready hoặc type:ci-repair
+    if: >-
+      (github.event.action == 'labeled' && (github.event.label.name == 'status:ready' || github.event.label.name == 'type:ci-repair')) ||
+      (github.event.action == 'opened' && (contains(github.event.issue.labels.*.name, 'status:ready') || contains(github.event.issue.labels.*.name, 'type:ci-repair')))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 🔒 Atomic Task Locking
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+        run: |
+          echo "Engaging atomic task locking on Issue #${ISSUE_NUM}..."
+          # 1. Gỡ nhãn status:ready nếu có
+          gh issue edit $ISSUE_NUM --remove-label "status:ready" || true
+          # 2. Gắn nhãn status:in-progress
+          gh issue edit $ISSUE_NUM --add-label "status:in-progress"
+          # 3. Gửi comment xác nhận
+          gh issue comment $ISSUE_NUM --body "🤖 **[Autonomous Stream-Aligned Team]**
+          Issue #${ISSUE_NUM} đã được **Atomic Locked** thành công qua GitHub Actions Dispatcher.
+          - **Trigger:** \`${{ github.event.action }}\` (\`${{ github.event.label.name }}\`)
+          - **Trạng thái:** \`status:in-progress\`
+          - **Engine:** DeepSeek Harness Autonomous Agent Dispatcher
+          *Đang khởi chạy luồng phân tích & kiểm thử tự trị...*"
+
+      - name: 🧪 Run Webhook Dispatcher Verification Suite
+        run: |
+          node tests/webhook-dispatcher.test.mjs
+
+      - name: 🚀 Execute DSH Autonomous Session (Dry-Run / Headless Simulation)
+        id: dsh_run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+          DISPATCHER_DRY_RUN: '1'
+        run: |
+          node tools/webhook-dispatcher.mjs --simulate-issue $ISSUE_NUM --label "${{ github.event.label.name || 'status:ready' }}" --dry-run
+
+      - name: 🎯 Mark Review Ready (On Success)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit $ISSUE_NUM --remove-label "status:in-progress" || true
+          gh issue edit $ISSUE_NUM --add-label "status:review-ready"
+          gh issue comment $ISSUE_NUM --body "🎉 **[Autonomous Stream-Aligned Team]**
+          Ticket #${ISSUE_NUM} đã vượt qua chu trình tự trị (DoR $\to$ Coding $\to$ QA Pass).
+          - **Trạng thái mới:** \`status:review-ready\`
+          - **Kính chuyển:** Sẵn sàng cho Human Review & Merge."
+
+      - name: 🚨 Escalate to Human Input (On Failure)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit $ISSUE_NUM --remove-label "status:in-progress" || true
+          gh issue edit $ISSUE_NUM --add-label "need:human-input"
+          gh issue comment $ISSUE_NUM --body "🚨 **[Autonomous Stream-Aligned Team - Escalation]**
+          Quá trình thực thi tự động của Ticket #${ISSUE_NUM} gặp sự cố hoặc test verification thất bại.
+          - **Trạng thái chuyển đổi:** \`need:human-input\`
+          - **Hành động:** Kính đề nghị Human Developer kiểm tra log Actions và xử lý."

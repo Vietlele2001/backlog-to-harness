@@ -1,0 +1,20 @@
+{
+  "name": "backlog-to-harness",
+  "version": "1.0.0",
+  "description": "Autonomous Backlog to Harness Stream-Aligned Pipeline: Webhook Dispatcher & Session Automation",
+  "type": "module",
+  "main": "tools/webhook-dispatcher.mjs",
+  "scripts": {
+    "start": "node tools/webhook-dispatcher.mjs",
+    "test": "node tests/webhook-dispatcher.test.mjs"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "webhook",
+    "dispatcher",
+    "autonomous-agents",
+    "c4-architecture"
+  ],
+  "author": "Autonomous Stream-Aligned Team (Vietlele2001)",
+  "license": "MIT"
+}
