@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Autonomous Stream-Aligned Team — Visual UAT Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-heading: #f0f6fc;
+      --text-muted: #8b949e;
+      --primary: #58a6ff;
+      --success: #3fb950;
+      --warning: #d29922;
+      --purple: #bc8cff;
+      --tag-bg: #21262d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 24px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .badge-live {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      background: rgba(63, 185, 80, 0.15);
+      border: 1px solid var(--success);
+      color: var(--success);
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; }
+    h1 { font-size: 24px; color: var(--text-heading); }
+    .subtitle { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+    
+    /* Pipeline cards */
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .stage-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      position: relative;
+    }
+    .stage-card.active { border-color: var(--primary); }
+    .stage-card.success { border-color: var(--success); }
+    .stage-num { font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; }
+    .stage-title { font-size: 16px; font-weight: 600; color: var(--text-heading); margin: 6px 0; }
+    .stage-desc { font-size: 13px; color: var(--text-muted); }
+    .stage-status {
+      margin-top: 12px;
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .status-pass { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .status-info { background: rgba(88, 166, 255, 0.2); color: var(--primary); }
+    
+    /* Main Content Sections */
+    .section-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .section-title {
+      font-size: 18px;
+      color: var(--text-heading);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    /* Table styling */
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+    th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background: rgba(255, 255, 255, 0.02); color: var(--text-muted); font-weight: 600; }
+    tr:hover td { background: rgba(255, 255, 255, 0.015); }
+    
+    .label-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 4px;
+    }
+    .tag-ready { background: #0e8a16; color: #fff; }
+    .tag-progress { background: #fbca04; color: #000; }
+    .tag-review { background: #1d76db; color: #fff; }
+    .tag-story { background: #5319e7; color: #fff; }
+    
+    /* Terminal logs */
+    .terminal {
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      color: #38ef7d;
+      max-height: 280px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .btn-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: #238636;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .btn-link:hover { background: #2ea043; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>👑 Autonomous Stream-Aligned Team — Visual UAT Dashboard</h1>
+        <div class="subtitle">Trực quan hóa luồng tự trị: Backlog (GitHub) ➔ Webhook Ingress ➔ DSH Engine (Profile: web) ➔ Review Ready</div>
+      </div>
+      <div>
+        <span class="badge-live"><span class="dot"></span> DSH Web GUI Integrated</span>
+      </div>
+    </header>
+
+    <!-- Pipeline Stages -->
+    <div class="pipeline-grid">
+      <div class="stage-card success">
+        <div class="stage-num">Giai đoạn 1</div>
+        <div class="stage-title">1. Backlog Ticket</div>
+        <div class="stage-desc">Issue #3 gán nhãn <code>status:ready</code> đạt chuẩn DoR & INVEST.</div>
+        <span class="stage-status status-pass">✓ Hoàn tất</span>
+      </div>
+      <div class="stage-card success">
+        <div class="stage-num">Giai đoạn 2</div>
+        <div class="stage-title">2. Webhook Ingress</div>
+        <div class="stage-desc">Xác thực HMAC SHA-256 (<code>X-Hub-Signature-256</code>) & HTTP 202 Accepted.</div>
+        <span class="stage-status status-pass">✓ Xác thực thành công</span>
+      </div>
+      <div class="stage-card success">
+        <div class="stage-num">Giai đoạn 3</div>
+        <div class="stage-title">3. Atomic Task Locking</div>
+        <div class="stage-desc">Gỡ <code>status:ready</code>, gắn <code>status:in-progress</code>, comment khóa task.</div>
+        <span class="stage-status status-pass">✓ Chống race condition</span>
+      </div>
+      <div class="stage-card active">
+        <div class="stage-num">Giai đoạn 4</div>
+        <div class="stage-title">4. DSH Web Session</div>
+        <div class="stage-desc">Khởi chạy phiên tự trị độc lập (Profile: <code>web</code>), phân tích 3 kịch bản BDD.</div>
+        <span class="stage-status status-info">⚡ Operational</span>
+      </div>
+      <div class="stage-card success">
+        <div class="stage-num">Giai đoạn 5</div>
+        <div class="stage-title">5. Handover UAT</div>
+        <div class="stage-desc">Chuyển nhãn <code>status:review-ready</code>, đăng tải biên bản nghiệm thu.</div>
+        <span class="stage-status status-pass">🎉 Review Ready</span>
+      </div>
+    </div>
+
+    <!-- Live UAT Inspection Details -->
+    <div class="section-card">
+      <div class="section-title">
+        <span>📋 Thông Tin Kiểm Nghiệm UAT: Issue #3 (Password Reset via Email)</span>
+      </div>
+      <p style="margin-bottom: 16px; color: var(--text-muted);">
+        Tính năng: <strong>User Password Reset via Email Service</strong> | Repository: <code>Vietlele2001/backlog-to-harness</code>
+      </p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Kịch bản BDD</th>
+            <th>Điều kiện & Tiêu chí (Given - When - Then)</th>
+            <th>Kết quả Thẩm định</th>
+            <th>Trạng thái</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Scenario 1: Reset Request</strong></td>
+            <td>Given email hợp lệ <code>user@example.com</code> ➔ POST /api/auth/reset-password-request ➔ Sinh token 32 bytes hết hạn 15m, gửi email link, trả về HTTP 200.</td>
+            <td>Token crypto sinh an toàn, expiry timer chuẩn 15m.</td>
+            <td><span class="stage-status status-pass">PASSED</span></td>
+          </tr>
+          <tr>
+            <td><strong>Scenario 2: Anti-Enumeration</strong></td>
+            <td>Given email chưa đăng ký ➔ Submit reset ➔ Hệ thống KHÔNG tiết lộ sự tồn tại của account, trả cùng generic response HTTP 200.</td>
+            <td>Bảo mật danh tính, chống tấn công account enumeration.</td>
+            <td><span class="stage-status status-pass">PASSED</span></td>
+          </tr>
+          <tr>
+            <td><strong>Scenario 3: Token Confirmation</strong></td>
+            <td>Given token hợp lệ & password mới $\ge 8$ ký tự ➔ Hash mật khẩu mới, vô hiệu hóa ngay token cũ chống replay attack.</td>
+            <td>Cập nhật hash thành công, token bị hủy tức thì sau 1 lần dùng.</td>
+            <td><span class="stage-status status-pass">PASSED</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="margin-top: 20px; display: flex; gap: 12px; align-items: center;">
+        <a class="btn-link" href="https://github.com/Vietlele2001/backlog-to-harness/issues/3" target="_blank">
+          ↗ Mở Issue #3 trên GitHub
+        </a>
+        <span style="font-size: 13px; color: var(--text-muted);">
+          DSH Session ID: <code>session-eb076824-537b-476b-87f0-2082c0ce9368</code>
+        </span>
+      </div>
+    </div>
+
+    <!-- Live Execution Logs -->
+    <div class="section-card">
+      <div class="section-title">
+        <span>💻 Nhật Ký Thực Thi DSH Web Session (Audit Trail Excerpt)</span>
+      </div>
+      <div class="terminal">[DISPATCHER] 📥 Received delivery: event='issues', action='labeled', label='status:ready'
+[DISPATCHER] 🔒 Engaging Atomic Lock on #3 in Vietlele2001/backlog-to-harness...
+[DISPATCHER] Removed label 'status:ready' from #3
+[DISPATCHER] Added label 'status:in-progress' to #3
+[DISPATCHER] ✅ Issue #3 locked successfully on GitHub.
+[DISPATCHER] 🚀 Spawning DSH Session for Issue #3 (Profile: web - Visual UAT Mode)...
+[DISPATCHER] 🆔 Captured DSH Session ID: session-eb076824-537b-476b-87f0-2082c0ce9368
+[DSH SESSION] Evaluating BDD Scenario 1 (Password Reset Request)... PASSED
+[DSH SESSION] Evaluating BDD Scenario 2 (Enumeration Attack Protection)... PASSED
+[DSH SESSION] Evaluating BDD Scenario 3 (Password Update with One-Time Token)... PASSED
+[DSH SESSION] Verification completed. Verdict: REVIEW READY. Exit code: 0
+[DISPATCHER] 🎯 Issue #3 completed! Transitioning to Review Ready.
+[DISPATCHER] Added label 'status:review-ready' to #3. Handover complete.</div>
+    </div>
+  </div>
+</body>
+</html>
