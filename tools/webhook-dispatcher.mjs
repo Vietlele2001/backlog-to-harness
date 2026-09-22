@@ -327,7 +327,7 @@ Mô tả & Acceptance Criteria:
 ----------------------------------------
 ${body}
 ----------------------------------------
-Quy tắc thực thi:
+Quy tắc thực thi theo chuẩn C4 & Full Quality DAG:
 1. Bạn là Stream-Aligned Autonomous Developer hoạt động trong DeepSeek Harness Headless Session.
 2. Phân tích yêu cầu và Acceptance Criteria của Task #${issueNumber}.
 3. Xác nhận môi trường thực thi và kiểm tra hệ thống.
