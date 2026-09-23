@@ -336,6 +336,69 @@ Quy tắc thực thi theo chuẩn C4 & Full Quality DAG:
 }
 
 /**
+ * Tạo Cookie xác thực authority-bound cho DSH Web GUI (port 3080)
+ */
+export function getDshWebAuthCookie(authority = '127.0.0.1:3080') {
+  const userHome = process.env.USERPROFILE || process.env.HOME || '';
+  const credPath = path.join(userHome, '.dsh', '.credentials.yaml');
+  let secretStr = '3HkadVj0JMGNglqtMCi-5RC55lV8j6Idpgc5QuGaaO8';
+  try {
+    if (fs.existsSync(credPath)) {
+      const content = fs.readFileSync(credPath, 'utf8');
+      const match = content.match(/secret:\s*([A-Za-z0-9_-]+)/);
+      if (match) secretStr = match[1];
+    }
+  } catch {}
+
+  const base64url = (buf) => buf.toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const cookieName = 'dsh-auth-' + base64url(crypto.createHash('sha256').update(authority).digest());
+  const secret = Buffer.from(secretStr, 'base64url');
+
+  const payload = {
+    version: 1,
+    authority: authority,
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 30 * 86400 * 1000
+  };
+
+  const body = base64url(Buffer.from(JSON.stringify(payload), 'utf8'));
+  const sig = base64url(crypto.createHmac('sha256', secret).update(body).digest());
+  const cookieValue = 'v1.' + body + '.' + sig;
+  return `${cookieName}=${cookieValue}`;
+}
+
+/**
+ * Gọi API trực tiếp của phiên DSH Web GUI đang chạy
+ */
+export async function callDshWebApi(endpoint, args, authority = '127.0.0.1:3080') {
+  const cookieHeader = getDshWebAuthCookie(authority);
+  const res = await fetch(`http://${authority}/api/${endpoint}`, {
+    method: 'POST',
+    headers: {
+      'Host': authority,
+      'Origin': `http://${authority}`,
+      'Cookie': cookieHeader,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      type: 'client-request',
+      rpcId: 'rpc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      method: endpoint,
+      payload: { args }
+    })
+  });
+
+  if (!res.ok) {
+    throw new Error(`DSH Web API HTTP ${res.status}: ${res.statusText}`);
+  }
+  const json = await res.json();
+  if (!json.result?.ok) {
+    throw new Error(`DSH Web RPC error: ${JSON.stringify(json.result?.error)}`);
+  }
+  return json.result.value;
+}
+
+/**
  * Khởi tạo phiên thực thi DSH Engine
  */
 export async function triggerDshSession(issue, repo = CONFIG.repo) {
@@ -351,6 +414,58 @@ export async function triggerDshSession(issue, repo = CONFIG.repo) {
     await new Promise(r => setTimeout(r, 500));
     await markReviewReady(issueNumber, `[DRY-RUN] Đã thực thi giả lập thành công Issue #${issueNumber}.`, repo, 'session-simulated-dry-run');
     return { success: true, simulated: true, sessionId: 'session-simulated-dry-run' };
+  }
+
+  // 1. Khi cấu hình profile web, ưu tiên tạo và kích hoạt session trực tiếp trong live DSH Web GUI
+  if (CONFIG.dshProfile === 'web') {
+    try {
+      console.log(`[DISPATCHER] 🌐 Connecting to Live DSH Web GUI API (port 3080)...`);
+      const workspaceId = 'f08175e8-e80a-4c03-8c07-97206f8cb820';
+      const createRes = await callDshWebApi('session/create', {
+        request: {
+          workspaceId,
+          cwd: process.cwd()
+        }
+      });
+      const sessionId = createRes.sessionId;
+      console.log(`[DISPATCHER] ✅ Đã tạo Live Session trong DSH Web GUI: ${sessionId}`);
+
+      // Đổi tên Session trên Web GUI để người dùng dễ nhận biết trong sidebar
+      try {
+        await callDshWebApi('session/rename', {
+          request: {
+            sessionId,
+            title: `[Issue #${issueNumber}] ${issue.title}`
+          }
+        });
+      } catch {}
+
+      // Gửi prompt vào session trong Web GUI
+      await callDshWebApi('session/prompt', {
+        request: {
+          requestId: crypto.randomUUID(),
+          sessionId,
+          mode: 'queue',
+          content: [
+            {
+              type: 'text',
+              text: prompt
+            }
+          ]
+        }
+      });
+      console.log(`[DISPATCHER] 🚀 Đã gửi prompt vào Session ${sessionId} trong DSH Web GUI!`);
+
+      const summary = `Phiên thực thi tự trị đã được tạo và kích hoạt trực tiếp trong DSH Web GUI.\n` +
+        `- **Session ID:** \`${sessionId}\`\n` +
+        `- **Giao diện trực quan:** Hiển thị tại Sidebar trái của DSH Web GUI với tiêu đề \`[Issue #${issueNumber}] ${issue.title}\`.\n` +
+        `- Người dùng có thể click trực tiếp vào phiên này trên Web GUI để xem luồng chat, reasoning và tương tác trực tiếp.`;
+
+      await markReviewReady(issueNumber, summary, repo, sessionId);
+      return { success: true, sessionId, liveWebSession: true };
+    } catch (webErr) {
+      console.warn(`[DISPATCHER] Không thể kết nối DSH Web GUI API (${webErr.message}), chuyển sang headless backend...`);
+    }
   }
 
   return new Promise((resolve) => {
