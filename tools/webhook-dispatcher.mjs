@@ -615,6 +615,47 @@ export async function handleWebhookEvent(event, payload) {
 }
 
 /**
+ * Chế độ Watcher: Định kỳ thăm dò GitHub Issues để phát hiện task 'status:ready' hoặc 'type:ci-repair'
+ */
+export async function startBacklogWatcher(intervalMs = 5000, repo = CONFIG.repo) {
+  console.log(`[WATCHER] 👁️ Bắt đầu theo dõi Backlog trên repo ${repo} (chu kỳ ${intervalMs / 1000}s)...`);
+
+  let polling = false;
+  const poll = async () => {
+    if (polling) return;
+    polling = true;
+    try {
+      if (!CONFIG.token) return;
+      const issues = await githubApi(`/repos/${repo}/issues?state=open&labels=${encodeURIComponent(CONFIG.readyLabel)}`);
+      if (Array.isArray(issues) && issues.length > 0) {
+        for (const issue of issues) {
+          if (issue.pull_request) continue; // Bỏ qua Pull Request
+          const issueNum = issue.number;
+          if (activeLocks.has(issueNum)) continue;
+
+          console.log(`[WATCHER] 🎯 Phát hiện Issue #${issueNum} có nhãn '${CONFIG.readyLabel}'! Đang kích hoạt chu trình tự trị...`);
+          const payload = {
+            action: 'labeled',
+            label: { name: CONFIG.readyLabel },
+            issue,
+            repository: { full_name: repo },
+            sender: { login: 'github-watcher' }
+          };
+          await handleWebhookEvent('issues', payload);
+        }
+      }
+    } catch (err) {
+      // Bỏ qua lỗi kết nối tạm thời
+    } finally {
+      polling = false;
+    }
+  };
+
+  await poll();
+  return setInterval(poll, intervalMs);
+}
+
+/**
  * Khởi tạo HTTP Webhook Server
  */
 export function createWebhookServer() {
@@ -784,5 +825,10 @@ if (isMainModule) {
       console.log(`GitHub Token:     ${CONFIG.token ? 'Configured' : 'Missing (Read-only)'}`);
       console.log(`=======================================================`);
     });
+
+    // Tự động kích hoạt Watcher định kỳ nếu có token để bắt sự kiện trực tiếp từ GitHub cloud
+    if (CONFIG.token && !CONFIG.dryRun) {
+      startBacklogWatcher(5000, CONFIG.repo);
+    }
   }
 }
