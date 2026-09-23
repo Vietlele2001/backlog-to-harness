@@ -423,8 +423,7 @@ export async function triggerDshSession(issue, repo = CONFIG.repo) {
       const workspaceId = 'f08175e8-e80a-4c03-8c07-97206f8cb820';
       const createRes = await callDshWebApi('session/create', {
         request: {
-          workspaceId,
-          cwd: process.cwd()
+          workspaceId
         }
       });
       const sessionId = createRes.sessionId;
